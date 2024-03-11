@@ -38,7 +38,8 @@ TinyGsm modem(SerialAT);
 XPowersPMU PMU;
 #define R 6371000
 #define TO_RAD (3.1415926536 / 180)
-char payload[90];
+#define MAX_PAYLOAD_SIZE 90
+char payload[MAX_PAYLOAD_SIZE];
 const String EMPTY = "";
 
 double haversine(double lat1, double lon1, double lat2, double lon2)
@@ -91,7 +92,7 @@ String generateTelemetryPayload()
       int8_t percent = -99;
       uint16_t milliVolts = -9999;
       modem.getBattStats(chargeState, percent, milliVolts);
-      snprintf(payload, 69, "{ \"timestamp\": %d%02d%02d%02d%02d%02d, \"long\": %.6f, \"lat\": %.6f, \"batt\": %d }",
+      snprintf(payload, MAX_PAYLOAD_SIZE-1, "{ \"timestamp\": %d%02d%02d%02d%02d%02d, \"long\": %.6f, \"lat\": %.6f, \"batt\": %d }",
                year,
                month,
                day,
