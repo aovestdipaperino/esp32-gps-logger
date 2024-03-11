@@ -102,7 +102,7 @@ String generateTelemetryPayload()
                lon,
                lat,
                percent);
-
+      DBG("Payload: ", payload);
       // Creates a copy
       return String(payload);
     }
