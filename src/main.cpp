@@ -22,9 +22,10 @@
 #include "iot_configs.h"
 #include <TinyGsmClient.h>
 #include <math.h>
+#include <TimeLib.h>
 #include <CircularBuffer.h>
 #if __has_include("test_iot_configs.h")
-# include "test_iot_configs.h"
+#include "test_iot_configs.h"
 #endif
 
 #ifdef DUMP_AT_COMMANDS
@@ -38,7 +39,8 @@ TinyGsm modem(SerialAT);
 XPowersPMU PMU;
 #define R 6371000
 #define TO_RAD (3.1415926536 / 180)
-#define MAX_PAYLOAD_SIZE 90
+#define MAX_PAYLOAD_SIZE 120 
+
 char payload[MAX_PAYLOAD_SIZE];
 const String EMPTY = "";
 
@@ -54,26 +56,50 @@ double haversine(double lat1, double lon1, double lat2, double lon2)
   return asin(sqrt(dx * dx + dy * dy + dz * dz) / 2) * 2 * R;
 }
 
-float lat = 0;
-float lon = 0;
-float speed = 0;
-float alt = 0;
-int vsat = 0;
-int usat = 0;
-float accuracy = 0;
-int year = 0;
-int month = 0;
-int day = 0;
-int hour = 0;
-int mins = 0;
-int sec = 0;
+float _lat = 0;
+float _lon = 0;
+float _speed = 0;
+float _alt = 0;
+int _vsat = 0;
+int _usat = 0;
+float _accuracy = 0;
+int _year = 0;
+int _month = 0;
+int _day = 0;
+int _hour = 0;
+int _mins = 0;
+int _sec = 0;
 
 bool refresh_gps()
 {
-  return modem.getGPS(&lat, &lon, &speed, &alt, &vsat, &usat, &accuracy,
-                      &year, &month, &day, &hour, &mins, &sec);
+  return modem.getGPS(&_lat, &_lon, &_speed, &_alt, &_vsat, &_usat, &_accuracy,
+                      &_year, &_month, &_day, &_hour, &_mins, &_sec);
 }
 
+enum MovementStatus
+{
+  STOPPED,
+  ON_THE_MOVE
+};
+MovementStatus currentMovementStatus = MovementStatus::STOPPED;
+time_t lastMovement = 0;
+char uuid[37];
+
+void generateUUID()
+{
+  for (int i = 0; i < 36; i++)
+  {
+    if (i == 8 || i == 13 || i == 18 || i == 23)
+    {
+      uuid[i] = '-';
+    }
+    else
+    {
+      uuid[i] = random(0, 16) < 10 ? random(0, 16) + '0' : random(0, 16) - 10 + 'A';
+    }
+  }
+  uuid[36] = '\0';
+}
 
 String generateTelemetryPayload()
 {
@@ -82,27 +108,50 @@ String generateTelemetryPayload()
 
   if (refresh_gps())
   {
-    double dist = haversine(lat, lon, prev_lat, prev_lon);
-    DBG("Distance (m): " + String(dist, 4) + " curr(" + String(lat, 6) + ", " + String(lon, 6) + ") prev(" + String(prev_lat, 6) + ", " + String(prev_lon, 6) + ") accuracy: " + String(accuracy, 6));
-    prev_lon = lon;
-    prev_lat = lat;
+    double dist = haversine(_lat, _lon, prev_lat, prev_lon);
+    DBG("Distance (m): " + String(dist, 4) + " curr(" + String(_lat, 6) + ", " + String(_lon, 6) + ") prev(" + String(prev_lat, 6) + ", " + String(prev_lon, 6) + ") speed: " + String(_speed, 4));
+    prev_lon = _lon;
+    prev_lat = _lat;
     if (dist > 1.0)
     {
       uint8_t chargeState = -99;
       int8_t percent = -99;
       uint16_t milliVolts = -9999;
       modem.getBattStats(chargeState, percent, milliVolts);
-      snprintf(payload, MAX_PAYLOAD_SIZE-1, "{ \"timestamp\": %d%02d%02d%02d%02d%02d, \"long\": %.6f, \"lat\": %.6f, \"batt\": %d }",
-               year,
-               month,
-               day,
-               hour,
-               mins,
-               sec,
-               lon,
-               lat,
-               percent);
-      DBG("Payload: ", payload);
+      tmElements_t t = {_sec, _mins, _hour, _day, _month, _year};
+      time_t timestamp = makeTime(t);
+      if (_speed > 0.0)
+      {
+        lastMovement = timestamp;
+        if (currentMovementStatus == MovementStatus::STOPPED)
+        {
+          currentMovementStatus = MovementStatus::ON_THE_MOVE;
+          generateUUID();
+        }
+      }
+      else
+      {
+        time_t currentTime = timestamp;
+        if (((currentTime - lastMovement) > 5 * 60) && (currentMovementStatus == MovementStatus::ON_THE_MOVE))
+        {
+          currentMovementStatus = MovementStatus::STOPPED;
+          generateUUID();
+        }
+      }
+      snprintf(payload, MAX_PAYLOAD_SIZE - 1, "{ timestamp: %d%02d%02d%02d%02d%02d, long: %.6f, lat: %.6f, speed: %f, batt: %d, id: %s, st: %d }",
+               _year,
+               _month,
+               _day,
+               _hour,
+               _mins,
+               _sec,
+               _lon,
+               _lat,
+               _speed,
+               percent,
+               uuid,
+               (int)currentMovementStatus);
+
       // Creates a copy
       return String(payload);
     }
@@ -110,7 +159,6 @@ String generateTelemetryPayload()
   }
   return EMPTY;
 }
-
 void restartRadio()
 {
   // Pull down PWRKEY for more than 1 second according to manual requirements
