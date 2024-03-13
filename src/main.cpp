@@ -86,7 +86,6 @@ MovementStatus currentMovementStatus = MovementStatus::STOPPED;
 time_t lastMovement = 0;
 UUID uuid;
 
-
 String generateTelemetryPayload()
 {
   static float prev_lon;
